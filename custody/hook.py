@@ -98,6 +98,11 @@ def post_tool_use(event: dict) -> None:
     else:
         state = json.loads(state_path.read_text())
         tool_response = event.get("tool_response")
+        # Bash's own Output object has no `success` field at all -- it's
+        # {stdout, stderr, interrupted, isImage} (confirmed from Claude
+        # Code's docs, not guessed). So tool_reported_success is always
+        # null on a real Bash receipt; that's expected, not a bug, and is
+        # exactly why bash_receipt() never uses it to decide pass/fail.
         tool_success = tool_response.get("success") if isinstance(tool_response, dict) else None
 
         if tool_name in ("Edit", "Write"):
@@ -127,7 +132,15 @@ _HANDLERS = {"PreToolUse": pre_tool_use, "PostToolUse": post_tool_use}
 
 
 def main() -> int:
-    event = json.load(sys.stdin)
+    try:
+        event = json.load(sys.stdin)
+    except json.JSONDecodeError as exc:
+        # Malformed stdin is exactly the kind of thing a witness has to
+        # survive too -- this used to be the one path that raised a
+        # traceback out of main() instead of failing quietly like every
+        # handler already does below.
+        sys.stderr.write(f"custody: could not parse hook input as JSON: {exc}\n")
+        return 0
     handler = _HANDLERS.get(event.get("hook_event_name"))
     if handler:
         try:

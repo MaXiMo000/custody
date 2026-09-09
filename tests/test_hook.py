@@ -140,6 +140,18 @@ class TestEditWriteRoundTrip(unittest.TestCase):
                   "tool_input": {"file_path": self.file_path}}  # no tool_use_id
         self.assertEqual(_run_hook(event), 0)
 
+    def test_unparseable_stdin_never_raises_out_of_main(self):
+        """Below the event-dict level: stdin that isn't even valid JSON at
+        all. Found by deliberately feeding the hook garbage while auditing
+        this repo a second time -- it used to let json.JSONDecodeError
+        escape main() as an uncaught traceback."""
+        real_stdin = sys.stdin
+        sys.stdin = io.StringIO("not json at all {{{")
+        try:
+            self.assertEqual(hook.main(), 0)
+        finally:
+            sys.stdin = real_stdin
+
 
 class TestBashRoundTrip(unittest.TestCase):
     def setUp(self):
@@ -160,14 +172,19 @@ class TestBashRoundTrip(unittest.TestCase):
         _run_hook(pre)
         with open(pathlib.Path(self.cwd, "existing.py"), "a") as f:
             f.write("y = 2\n")
+        # Bash's real Output object -- {stdout, stderr, interrupted, isImage},
+        # no `success` field at all, confirmed from Claude Code's own docs.
         post = {**pre, "hook_event_name": "PostToolUse",
-                 "tool_response": {"stdout": "", "stderr": "", "exitCode": 0}}
+                 "tool_response": {"stdout": "", "stderr": "", "interrupted": False, "isImage": False}}
         _run_hook(post)
 
         path = pathlib.Path(self.cwd, ".custody", "receipts", f"{tool_use_id}.json")
         payload = json.loads(path.read_text())["payload"]
         self.assertEqual(payload["status"], "unverified")
         self.assertEqual(payload["changes"]["modified"], ["existing.py"])
+        # Locking in the real Output shape's absence of `success`: this must
+        # read null on a real Bash receipt, not a guessed True/False.
+        self.assertIsNone(payload["tool_reported_success"])
 
 
 if __name__ == "__main__":

@@ -97,6 +97,12 @@ judged. A real declaration mechanism -- a sidecar file a skill writes
 before running a command it wants scoped -- is real future work,
 deliberately not built here.
 
+Bash's own `tool_response` (the `Output` object) has no `success` field at
+all -- it's `{stdout, stderr, interrupted, isImage}`. `tool_reported_success`
+is therefore always `null` on a real Bash receipt; that's the real schema,
+not a gap in this hook, which is exactly why `bash_receipt()` never uses it
+to decide anything.
+
 ## Why this depends on `receipt`
 
 `custody`'s Bash path is, almost literally, the audit's own MVP note for
@@ -135,6 +141,11 @@ needing a converter.
   time that exact `tool_use_id` completes, which never happens for an
   abandoned one. A `custody gc` command to sweep old ones on a schedule is
   a five-line addition, not built here.
+- **Windows is untested.** Claude Code's own docs note `tool_input.file_path`
+  arrives with backslash separators there; `pathlib.Path` handles that
+  correctly when Python itself is running on Windows, but CI here only
+  runs Ubuntu, so that claim is architectural, not measured. Stated
+  honestly rather than either claimed or silently ignored.
 
 ## Tests
 
@@ -145,6 +156,14 @@ python tests/test_hook.py    # real files, real temp dirs, real stdin/stdout,
                               # event JSON shaped exactly like Claude Code's
                               # own documented PreToolUse/PostToolUse payloads
 ```
+
+## Dogfooding
+
+`.claude/settings.json` in this repo wires custody onto itself -- after
+`pip install -e .`, editing a file in *this* checkout with Claude Code
+writes a real receipt to `.custody/receipts/` for that edit. It's the
+closest thing to a live end-to-end test that doesn't require a second
+project: the tool watching its own development.
 
 ## Status
 
