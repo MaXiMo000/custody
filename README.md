@@ -202,6 +202,29 @@ being broken -- the gap is specifically in *getting Claude Code to invoke
 the hook automatically* for this session shape, not in what the hook does
 once invoked.
 
+**Second attempt, narrower finding**: this exact edit, and a Bash command
+run right after it, were both made from a genuine top-level interactive
+Claude Code session -- the case the worktree-subagent test above couldn't
+reach. Same result: no `.custody/` directory appeared for either call.
+The one thing this run adds is a clean, confirmed variable the worktree
+test left ambiguous: this session's own project root is a *parent*
+directory of `custody/`, not `custody/` itself -- `.claude/settings.json`
+was read from a subdirectory the session merely happened to be editing
+files in, not from where the session was actually rooted. That is now the
+leading explanation for both negative results, not the vaguer
+"session-start-time loading or a subagent code path" guess from before:
+Claude Code most likely reads project hooks from the session's own root
+at launch, and a subdirectory's `.claude/settings.json` -- however real
+the file, however correct its contents -- never enters the picture unless
+a session is actually *started* with that directory as its root.
+
+That specific claim is still unconfirmed, because testing it needs a
+fresh `claude` process launched with `custody/` as its own cwd from the
+start -- watched interactively, which is a terminal action only a person
+at the keyboard can take, not something this session can spawn and
+observe itself. **If you want this fully closed**: `cd custody && claude`,
+make one real edit, and check `.custody/receipts/`.
+
 Two plausible, unconfirmed causes, neither chased further this round: hook
 configuration may only be read once at top-level session startup rather
 than picked up by a worktree-isolated subagent spawned mid-session, or a
