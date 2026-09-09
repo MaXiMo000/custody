@@ -1,0 +1,38 @@
+[project]
+# "custody" was already taken on PyPI, same story as receipt/providence
+# before it (checked, not assumed). The installed command stays the short
+# name -- python-dateutil installs `dateutil`, this installs `custody`.
+name = "custody-evidence"
+version = "0.1.0"
+description = "A live Claude Code hook that writes a receipt for every Edit/Write/Bash tool call, not just a diff at the end of the session."
+requires-python = ">=3.10"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["verification", "audit", "agents", "provenance", "evidence", "claude-code", "hooks"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Testing",
+]
+# receipt.snapshot is the real snapshot/diff core this reuses for Bash --
+# see README.md's "Why this depends on receipt" section.
+dependencies = ["receipt-evidence>=0.1.0"]
+
+urls.Homepage = "https://github.com/MaXiMo000/custody"
+urls.Source = "https://github.com/MaXiMo000/custody"
+urls.Issues = "https://github.com/MaXiMo000/custody/issues"
+urls.Changelog = "https://github.com/MaXiMo000/custody/releases"
+
+[project.scripts]
+custody-hook = "custody.hook:main"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["custody*"]
