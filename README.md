@@ -187,11 +187,29 @@ registration format). Verified at three levels, not just unit tests:
    -- and it validated clean, with no `custody`-specific code in the
    checker at all.
 
-**Not yet done**: registering it in an actual `.claude/settings.json` and
-watching a real, live Claude Code session fire it during real Edit/Write/Bash
-tool calls end to end -- the one remaining mile between "the contract is
-implemented correctly" and "it does this automatically at the end of every
-tool call in daily use." That's the next thing to do before trusting this
-beyond what the three levels above already pin down.
+**Attempted, and the honest result**: `.claude/settings.json` is committed
+in this repo, wiring the hook onto its own `Edit`/`Write`/`Bash` calls (see
+"Dogfooding" above). A subagent session was run inside a fresh worktree of
+this exact repo, with that config already in place, and asked to perform
+real `Write`, `Edit`, and `Bash` tool calls and check `.custody/receipts/`
+afterward. **No receipts appeared for any of the three real calls** --
+`custody-hook` was never invoked automatically. The same subagent then
+piped a hand-built, doc-shaped event directly into `custody-hook` as a
+manual sanity check, and that worked perfectly on the first try (a real
+receipt, correct `status`, correct `declared_scope`), which rules out the
+binary, the `receipt-evidence` dependency, or the receipt-writing logic
+being broken -- the gap is specifically in *getting Claude Code to invoke
+the hook automatically* for this session shape, not in what the hook does
+once invoked.
+
+Two plausible, unconfirmed causes, neither chased further this round: hook
+configuration may only be read once at top-level session startup rather
+than picked up by a worktree-isolated subagent spawned mid-session, or a
+subagent's tool execution may route through a path that doesn't consult
+project-level hooks the same way an interactive top-level session does.
+**The next thing to try** is registering this in a real top-level Claude
+Code session's own settings (not a subagent's worktree) and watching an
+ordinary interactive edit fire it -- that's a materially different test
+from the one just run, and this repo doesn't yet know the answer to it.
 
 MIT licensed.
