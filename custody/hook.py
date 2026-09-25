@@ -56,6 +56,22 @@ def _providence_bundle(tool: str, payload: dict) -> dict:
     }
 
 
+def _claimed_text(tool_name: str, response) -> str | None:
+    """The full file text the tool says it left on disk, from its own
+    response: Write reports `content`; Edit reports `originalFile` plus the
+    `oldString` -> `newString` replacement it made. None if the response
+    doesn't carry enough to say."""
+    if not isinstance(response, dict):
+        return None
+    if tool_name == "Write":
+        content = response.get("content")
+        return content if isinstance(content, str) else None
+    original, old, new = (response.get(k) for k in ("originalFile", "oldString", "newString"))
+    if not all(isinstance(v, str) for v in (original, old, new)) or old not in original:
+        return None
+    return original.replace(old, new, -1 if response.get("replaceAll") else 1)
+
+
 def pre_tool_use(event: dict) -> None:
     tool_name = event.get("tool_name")
     if tool_name not in WATCHED_TOOLS:
@@ -98,18 +114,28 @@ def post_tool_use(event: dict) -> None:
     else:
         state = json.loads(state_path.read_text())
         tool_response = event.get("tool_response")
-        # Bash's own Output object has no `success` field at all -- it's
-        # {stdout, stderr, interrupted, isImage} (confirmed from Claude
-        # Code's docs, not guessed). So tool_reported_success is always
-        # null on a real Bash receipt; that's expected, not a bug, and is
-        # exactly why bash_receipt() never uses it to decide pass/fail.
-        tool_success = tool_response.get("success") if isinstance(tool_response, dict) else None
+        # Claude Code only sends PostToolUse after a tool *succeeded* (a
+        # failure is a separate PostToolUseFailure event), and real Edit/
+        # Write/Bash responses carry no `success` field at all -- measured
+        # live. So for Edit/Write a PostToolUse is itself the success claim;
+        # an explicit `success: false`, if one ever appears, still wins.
+        # Bash stays null: whether a non-zero exit counts as tool failure
+        # hasn't been measured, and bash_receipt() doesn't judge on it.
+        tool_success = None
+        if isinstance(tool_response, dict):
+            implied = True if tool_name in ("Edit", "Write") else None
+            tool_success = tool_response.get("success", implied)
 
         if tool_name in ("Edit", "Write"):
             after_hash = core.hash_file(state["file_path"])
+            claimed = _claimed_text(tool_name, tool_response)
+            claim_matches = None
+            if claimed is not None and after_hash is not None:
+                claim_matches = core.matches_claim(claimed, pathlib.Path(state["file_path"]).read_bytes())
             result = core.file_receipt(
                 file_path=state["file_path"], before_hash=state["before_hash"],
-                after_hash=after_hash, tool_name=tool_name, tool_success=tool_success)
+                after_hash=after_hash, tool_name=tool_name, tool_success=tool_success,
+                claim_matches=claim_matches)
         else:  # Bash
             after = snapshot_dir(state["cwd"])
             result = core.bash_receipt(before=state["before"], after=after,

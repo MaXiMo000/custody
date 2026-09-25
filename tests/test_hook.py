@@ -153,6 +153,90 @@ class TestEditWriteRoundTrip(unittest.TestCase):
             sys.stdin = real_stdin
 
 
+class TestRealPayloadShapes(unittest.TestCase):
+    """tool_response shapes copied from real Claude Code 2.1 PostToolUse
+    events, captured live -- not reconstructed from docs. Neither Edit nor
+    Write sends a `success` field; the tests above that pass one exercise
+    the fallback path only."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cwd = self.tmp.name
+        self.path = pathlib.Path(self.cwd) / "a.txt"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _round_trip(self, tool_name: str, tool_response: dict, write_bytes: bytes | None) -> dict:
+        tool_use_id = f"toolu_{tool_name}_{len(tool_response)}"
+        pre = {"session_id": "s1", "cwd": self.cwd, "hook_event_name": "PreToolUse",
+               "tool_name": tool_name, "tool_use_id": tool_use_id,
+               "tool_input": {"file_path": str(self.path)}}
+        _run_hook(pre)
+        if write_bytes is not None:
+            self.path.write_bytes(write_bytes)
+        _run_hook({**pre, "hook_event_name": "PostToolUse", "tool_response": tool_response})
+        receipt = pathlib.Path(self.cwd, ".custody", "receipts", f"{tool_use_id}.json")
+        return json.loads(receipt.read_text())["payload"]
+
+    def _edit_response(self, original: str, old: str, new: str) -> dict:
+        return {"filePath": str(self.path), "oldString": old, "newString": new,
+                "originalFile": original, "structuredPatch": [], "userModified": False,
+                "replaceAll": False}
+
+    def test_write_whose_content_is_on_disk_is_pass(self):
+        payload = self._round_trip("Write", {
+            "type": "create", "filePath": str(self.path), "content": "x",
+            "structuredPatch": [], "originalFile": None, "userModified": False,
+        }, b"x")
+        self.assertEqual(payload["status"], "pass")
+        self.assertIn("matches exactly", payload["detail"])
+        self.assertTrue(payload["tool_reported_success"])
+
+    def test_write_whose_content_is_not_what_landed_on_disk_is_fail(self):
+        # A partial write, or another process racing the tool.
+        payload = self._round_trip("Write", {
+            "type": "create", "filePath": str(self.path), "content": "full content\n",
+            "structuredPatch": [], "originalFile": None, "userModified": False,
+        }, b"full con")
+        self.assertEqual(payload["status"], "fail")
+        self.assertIn("not what Write reported writing", payload["detail"])
+
+    def test_edit_that_landed_is_pass(self):
+        self.path.write_bytes(b"alpha\n")
+        payload = self._round_trip("Edit", self._edit_response("alpha\n", "alpha", "beta"), b"beta\n")
+        self.assertEqual(payload["status"], "pass")
+
+    def test_edit_that_never_landed_is_fail(self):
+        self.path.write_bytes(b"alpha\n")
+        payload = self._round_trip("Edit", self._edit_response("alpha\n", "alpha", "beta"), None)
+        self.assertEqual(payload["status"], "fail")
+
+    def test_edit_of_a_crlf_file_is_pass(self):
+        # Measured live: Edit reports LF text but keeps the file's CRLF.
+        self.path.write_bytes(b"one\r\ntwo\r\n")
+        payload = self._round_trip("Edit", self._edit_response("one\ntwo\n", "two", "three"),
+                                   b"one\r\nthree\r\n")
+        self.assertEqual(payload["status"], "pass")
+
+    def test_edit_of_a_bom_file_is_pass(self):
+        # Measured live: Edit reports a UTF-8 BOM as the mojibake U+00EF U+00BB U+00BF.
+        self.path.write_bytes(b"\xef\xbb\xbfbom line\n")
+        payload = self._round_trip(
+            "Edit", self._edit_response("ï»¿bom line\n", "bom line", "bom edited"),
+            b"\xef\xbb\xbfbom edited\n")
+        self.assertEqual(payload["status"], "pass")
+
+    def test_a_non_utf8_file_falls_back_rather_than_guessing(self):
+        self.path.write_bytes(b"caf\xe9\n")
+        payload = self._round_trip("Edit", self._edit_response("caf�\n", "caf", "bar"),
+                                   b"bar\xe9\n")
+        # Not compared as text (can't be, honestly), so the hash-based
+        # fallback decides: the tool succeeded and the file changed.
+        self.assertEqual(payload["status"], "pass")
+        self.assertNotIn("matches exactly", payload["detail"])
+
+
 class TestBashRoundTrip(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

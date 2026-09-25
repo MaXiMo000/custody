@@ -27,8 +27,36 @@ def hash_file(path: str) -> str | None:
     return h.hexdigest()
 
 
+# A UTF-8 BOM as a real U+FEFF, and as the mojibake Claude Code's Edit
+# response actually reports for a BOM file's first bytes (U+00EF U+00BB U+00BF).
+_BOMS = ("﻿", "ï»¿")
+
+
+def _normalize(text: str) -> str:
+    for bom in _BOMS:
+        if text.startswith(bom):
+            text = text[len(bom):]
+            break
+    return text.replace("\r\n", "\n")
+
+
+def matches_claim(claimed_text: str, disk_bytes: bytes) -> bool | None:
+    """Is what's on disk exactly the text the tool says it wrote?
+
+    Compared as text, ignoring only what the tool legitimately preserves
+    rather than reports: Edit keeps a file's CRLF line endings and BOM on
+    disk while reporting LF text (measured live, not assumed). None means
+    "can't compare honestly": the file isn't UTF-8."""
+    try:
+        disk_text = disk_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    return _normalize(disk_text) == _normalize(claimed_text)
+
+
 def file_receipt(*, file_path: str, before_hash: str | None, after_hash: str | None,
-                  tool_name: str, tool_success: bool | None) -> dict:
+                  tool_name: str, tool_success: bool | None,
+                  claim_matches: bool | None = None) -> dict:
     """Edit/Write: the declared scope is trivially the one path the tool
     itself named in its own call -- there is no "unexpected file" it could
     have touched instead, the way a shell command could. So the useful
@@ -52,6 +80,23 @@ def file_receipt(*, file_path: str, before_hash: str | None, after_hash: str | N
 
     changed = before_hash != after_hash
     kind = "created" if before_hash is None else ("modified" if changed else "unchanged")
+
+    # The strong check, when the tool reported the content it wrote (Write's
+    # `content`, Edit's `originalFile` with the replacement applied): not
+    # "did the file change" but "is it exactly what the tool says it wrote".
+    if claim_matches is False:
+        return {
+            "declared_scope": [file_path], "status": FAIL,
+            "detail": (f"{file_path} on disk is not what {tool_name} reported writing -- "
+                       "a partial write, or something else changed it in between"),
+            "changed": kind, "tool_reported_success": tool_success,
+        }
+    if claim_matches is True:
+        return {
+            "declared_scope": [file_path], "status": PASS,
+            "detail": f"{file_path} {kind} on disk, and matches exactly what {tool_name} reported writing",
+            "changed": kind, "tool_reported_success": tool_success,
+        }
 
     if tool_success is False and changed:
         return {
