@@ -18,8 +18,7 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install -e .
-      - run: python tests/test_core.py
-      - run: python tests/test_hook.py
+      - run: python tests/test_shim.py
 
       # The tag and the packaged version must be the same thing. Without this a
       # repo happily ships v0.2.0 built from a tree that still says 0.1.0, and
