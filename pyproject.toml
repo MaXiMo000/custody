@@ -3,7 +3,7 @@
 # before it (checked, not assumed). The installed command stays the short
 # name -- python-dateutil installs `dateutil`, this installs `custody`.
 name = "custody-evidence"
-version = "0.1.0"
+version = "0.1.1"
 description = "A live Claude Code hook that writes a receipt for every Edit/Write/Bash tool call, not just a diff at the end of the session."
 requires-python = ">=3.10"
 readme = "README.md"
